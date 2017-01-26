@@ -1,0 +1,427 @@
+#!/bin/sh
+################################################################################
+#                                                                              #
+#                              ROUNDABOUT by KB19                              #
+#                            ----------------------                            #
+#                             v0.1.0 -- 2016/05/16                             #
+#                                                                              #
+# Successor of OWRHS (routing helper script). Now with UCI support.            #
+# Designed for OpenWrt 15.05 or newer, tested with version 15.05.1!            #
+#                                                                              #
+# This script is a helper script for the following purposes:                   #
+#                                                                              #
+#  * Restart services (daemons) or networks (interfaces) on ifup/ifdown.       #
+#  * Policy-Based Routing (PBR): Setup rules and tables for source addresses.  #
+#  * LED management (routing): Enable or disable leds on default route change. #
+#  * LED management (link layer): Enable or disable leds on ifup/ifdown.       #
+#  * OpenDNS hostname updates: Use DynDNS to update the IP addresses.          #
+#                                                                              #
+# There's full IPv6 support for all features! (excluding OpenDNS stuff...)     #
+#                                                                              #
+# UCI config: /etc/config/roundabout                                           #
+# Executable: /etc/hotplug.d/iface/60-roundabout                               #
+# Wiki page:  ***** HIDDEN *****                                               #
+#                                                                              #
+################################################################################
+#                                                                              #
+# Overview of all supported configuration variables.                           #
+# Global options can be overridden at "iface" level!                           #
+#                                                                              #
+#   global.source_routing   = <0-3>  PBR on/off (2 = IPv4 only; 3 = IPv6 only) #
+#   global.routing_ipv      = <4/6>  IP version for default routing check.     #
+#   global.target_ipv(4|6)  = <...>  IP address for default routing check.     #
+#   global.restart_services = <0/1>  Enable/disable restart of services.       #
+#   global.restart_service  = <...>  List of Initscripts to restart.           #
+#   global.restart_networks = <0/1>  Enable/disable restart of interfaces.     #
+#   global.restart_network  = <...>  List of interfaces to restart.            #
+#                                                                              #
+# Note: opendns.enable can be overridden at "iface" level too.                 #
+#                                                                              #
+#   opendns.enable          = <0/1>  Enable/disable OpenDNS DDNS updates.      #
+#   opendns.username        = <...>  Username for OpenDNS dashboard.           #
+#   opendns.password        = <...>  Password for OpenDNS dashboard.           #
+#   opendns.hostname        = <...>  Suffix for OpenDNS hostnames.             #
+#                                                                              #
+# Interface section for "name": config iface name                              #
+# Don't forget: All global variables are valid here.                           #
+#                                                                              #
+#   iface.enable            = <0/1>  Required! Enable/disable the config.      #
+#   iface.routing_priority  = <...>  Required! Unique priority for rules.      #
+#                                                                              #
+#   iface.routing_table     = <...>  ID or name, see: /etc/iproute2/rt_tables  #
+#   iface.name              = <...>  Use another name for OpenDNS and table.   #
+#   iface.hostname          = <...>  Use another hostname for OpenDNS.         #
+#                                                                              #
+# Warning: All leds will be switched off at ifdown or default route loss!      #
+# It's a bit tricky to get the desired results, maybe there are bugs too.      #
+#                                                                              #
+#   iface.enable_led        = <...>  Enable leds on ifup. (netdev trigger)     #
+#   iface.disable_led       = <...>  Disable leds on ifdown (none trigger)     #
+#                                                                              #
+# The "default" leds are switches based on default routing check.              #
+# The check will run anytime a configured interface goes up/down.              #
+#                                                                              #
+#   iface.enable_default_led         (same as above)                           #
+#   iface.disable_default_led        (same as above)                           #
+#                                                                              #
+################################################################################
+#                                                                              #
+# Example usage scenario: Two uplinks (primary DSL and UMTS as fallback).      #
+# The routing metric decides which one is currently used. There is no Multiwan #
+# package required! It depends on PPPoE-session errors. Furthermore there are  #
+# multiple IPv6 tunnels. PBR is used for all IPv4/IPv6 addresses and subnets.  #
+# Update OpenDNS hosts on-the-fly, restart QOS/DNSCrypt and 6to4 interface.    #
+# Furthermore it controls the WPS-LED, indicating our routing status...        #
+#                                                                              #
+#     WPS LED (UMTS Uplink)                                                    #
+#     ------------------------                                                 #
+#     disabled: modem inactive                                                 #
+#     green:    route inactive                                                 #
+#     orange:   route active                                                   #
+#                                                                              #
+################################################################################
+
+# DON'T CHANGE IT!
+SCR="roundabout"
+ENABLE_DEBUG=0
+
+# Required OpenWrt libs.
+. /lib/functions.sh && \
+. /lib/functions/network.sh || \
+exit 1
+
+# Log to system log and send it to STDERR too.
+# Ignore debug messages when not in debug mode.
+log()
+{
+	if [ "$2" != "debug" -o "$ENABLE_DEBUG" -eq 1 ]; then
+	logger -p "user.${2:-info}" -t "$SCR[$$]" -s "$1"; fi
+}
+
+# Variable variables for the shell.
+# Copy content to another variable.
+get_var()
+{
+	eval "$2=\"\$$1\""
+}
+
+# UCI callback for global/opendns section.
+# Results will be stored in "$cfg_<NAME>".
+config_cb()
+{
+	if [ "$1" != "iface" ]
+	then eval "cfg_$1=$2"; fi
+}
+
+# UCI loop for all interfaces.
+# Required for led iteration.
+config_loop()
+{
+	local __; config_get_bool __ "$1" enable "false"
+	if [ "$__" -eq 1 ]; then ifaces="$ifaces $1"
+
+		config_get "routing_version_$1"     "$1" routing_ipv         "$routing_ipv"
+		config_get "target_ipv4_$1"         "$1" target_ipv4         "$target_ipv4"
+		config_get "target_ipv6_$1"         "$1" target_ipv6         "$target_ipv6"
+
+		config_get "disable_default_led_$1" "$1" disable_default_led
+		config_get "enable_default_led_$1"  "$1" enable_default_led
+		config_get "disable_led_$1"         "$1" disable_led
+		config_get "enable_led_$1"          "$1" enable_led
+	fi
+}
+
+# Restart services (daemons) by their init scriptname.
+# Pass all names by space separated as first argument.
+restart_services()
+{
+	for service in $1
+	do
+		local file="/etc/init.d/${service}"
+		log "restart_services(): service=${service}" "debug"
+		log "restart_services(): initfile=${file}" "debug"
+
+		if [ -x "$file" ]; then if "$file" restart
+		then log "Successfully restarted service ${service}."
+		else log "Could not restart service ${service}!" "error"; fi
+		else log "Could not restart service ${service}: Initscript not found!" "warn"; fi
+	done
+}
+
+# Restart networks (interfaces) by their virtual name.
+# Pass all names by space separated as first argument.
+restart_networks()
+{
+	for network in $1
+	do
+		log "restart_networks(): network=${network}" "debug"
+
+		if [ "$INTERFACE" != "$network" ]; then if ifup "$network"
+		then log "Successfully restarted network/interface ${network}."
+		else log "Could not restart network/interface ${network}!" "error"; fi
+		else log "Could not restart network/interface ${network}: Loop detected!" "warn"; fi
+	done
+}
+
+# Update OpenDNS hostname with current IP.
+# Arguments: hostname, ipv4 addr, ipv6 addr.
+update_odns()
+{
+	local host="$1"
+	local ipv4="$2"
+	local ipv6="$3"
+
+	if [ "$ipv6" != "" ]
+	then
+		log "Ignoring IPv6, not supported by OpenDNS." "debug"
+	fi
+
+	if [ "$ipv4" != "" ]
+	then
+		result=`\
+			wget --quiet --tries=3 --timeout=30 --bind-address="$ipv4" \
+				--http-user="$odns_username" --http-password="$odns_password" \
+				"https://updates.opendns.com/nic/update?hostname=${host}" \
+				--output-document=- | tr -d '\n'`
+
+		if [ "$result" = "good ${ipv4}" ]
+		then log "Successfully updated OpenDNS hostname ${host} with IP ${ipv4}."
+		else log "Could not update OpenDNS hostname ${host} with IP ${ipv4}: ${result}" "warn"; fi
+	fi
+}
+
+# Enable leds. Pass all names by space separated as first argument.
+# Second argument: empty = default-on; not empty = netdev device name.
+enable_leds()
+{
+	for led in $1
+	do
+		if [ "$2" = "" ]
+		then
+			echo "none" > "/sys/class/leds/${led}/trigger"
+			log "LED ${led} enabled. (default-on)" "debug"
+		else
+			echo "netdev" > "/sys/class/leds/${led}/trigger"
+			echo "link rx tx" > "/sys/class/leds/${led}/mode"
+			echo "$2" > "/sys/class/leds/${led}/device_name"
+			log "LED ${led} enabled. (netdev $2)" "debug"
+		fi
+
+		echo "1" > "/sys/class/leds/${led}/brightness"
+	done
+}
+
+# Disable leds. Pass all names by space separated as first argument.
+disable_leds()
+{
+	for led in $1
+	do
+		echo "none" > "/sys/class/leds/${led}/trigger"
+		echo "0" > "/sys/class/leds/${led}/brightness"
+		log "LED ${led} disabled." "debug"
+	done
+}
+
+config_load "$SCR" || exit 1
+log "Main configuration loaded into memory." "debug"
+log "VARDUMP: INTERFACE=${INTERFACE}; ACTION=${ACTION}; DEVICE=${DEVICE}" "debug"
+
+config_get_bool enable "$INTERFACE" enable "false"
+if [ "$enable" -ne 1 ]; then log "No config enabled." "debug"; exit 0; fi
+
+# Current limitation: It'll stop here without led loop for all interfaces
+# when the current interface isn't configured. All interfaces that could
+# change a led from another interface, must have an enabled config block!
+# We can't change that because it would be useless waste of ressources...
+config_get routing_ipv "$cfg_global" routing_ipv "4"
+config_get target_ipv4 "$cfg_global" target_ipv4 "1.0.0.0"
+config_get target_ipv6 "$cfg_global" target_ipv6 "2000::1"
+config_foreach config_loop iface
+
+# Possible values: 0-3 (don't use config_get_bool here!)
+config_get      source_routing           "$cfg_global"  source_routing   "0"
+config_get      restart_services         "$cfg_global"  restart_services "0"
+config_get      restart_networks         "$cfg_global"  restart_networks "0"
+config_get      source_routing           "$INTERFACE"   source_routing   "$source_routing"
+config_get      restart_services         "$INTERFACE"   restart_services "$restart_services"
+config_get      restart_networks         "$INTERFACE"   restart_networks "$restart_networks"
+
+# List elements separated by space.
+config_get      restart_service_default  "$cfg_global"  restart_service
+config_get      restart_network_default  "$cfg_global"  restart_network
+config_get      restart_service_extended "$INTERFACE"   restart_service
+config_get      restart_network_extended "$INTERFACE"   restart_network
+
+# All other UCI elements...
+config_get_bool odns_enable              "$cfg_opendns" enable           "0"
+config_get      odns_username            "$cfg_opendns" username
+config_get      odns_password            "$cfg_opendns" password
+config_get      odns_suffix              "$cfg_opendns" hostname
+config_get      hostname                 "$INTERFACE"   hostname
+config_get      ifname                   "$INTERFACE"   name             "$INTERFACE"
+config_get      table                    "$INTERFACE"   routing_table    "$ifname"
+config_get      priority                 "$INTERFACE"   routing_priority "0"
+
+if [ "$source_routing" -ne 0 ] && [ "$priority" -lt 0 -o "$priority" -gt 65536 ]
+then log "Missing routing priority! Skipping interface..." "error"; exit 1; fi
+
+if [ "$odns_enable" -eq 1 ] && [ "$odns_username" = "" -o "$odns_password" = "" ]
+then odns_enable=0; log "OpenDNS updates disabled: Missing username/password!" "warn"; fi
+
+config_load "network" || exit 1
+log "Network config loaded into memory." "debug"
+config_get ip6prefix "$INTERFACE" ip6prefix
+config_get proto "$INTERFACE" proto
+
+log "VARDUMP: proto=${proto}; ifname=${ifname}; table=${table}; priority=${priority}; ip6prefix=${ip6prefix}" "debug"
+log "VARDUMP: source_routing=${source_routing}; odns_enable=${odns_enable}; odns_suffix=${odns_suffix}; hostname=${hostname}" "debug"
+log "VARDUMP: restart_services=${restart_services} (${restart_service_default} ${restart_service_extended}); restart_networks=${restart_networks} (${restart_network_default} ${restart_network_extended})" "debug"
+
+if [ "$ACTION" = "ifup" ]
+then
+	if [ "$source_routing" = "1" -o "$source_routing" -eq 2 ]
+	then
+		prefix4="32"
+		prefix6="128"
+
+		if [ "$proto" = "6to4" ]
+		then prefix6="48"; fi
+
+		ip4=`ip -o -4 addr show "$DEVICE" scope global | awk '{ sub(/\/.*$/,"",$4); print $4 "/'"$prefix4"'" }'`
+		ip6=`ip -o -6 addr show "$DEVICE" scope global | awk '{ sub(/\/.*$/,"",$4); print $4 "/'"$prefix6"'" }' | grep -v '^f' | grep -v '\.'`
+		if [ "$ip6prefix" != "" ]; then ip6="$ip6 $ip6prefix"; fi
+
+		if [ "$ip4" = "" ]
+		then
+			log "No IPv4 address(es) found!" "debug"
+		else
+			if ip -4 route add default dev "$DEVICE" table "$table"
+			then log "Successfully added IPv4 routing table ${table} for interface ${INTERFACE} (${DEVICE})."
+			else log "Could not add IPv4 routing table ${table} for interface ${INTERFACE} (${DEVICE})." "warn"; fi
+
+			for ip in $ip4
+			do
+				ip -4 rule add from "$ip" lookup "$table" priority "$priority" && \
+				log "Successfully changed source routing from IPv4 address ${ip} for interface ${INTERFACE} (${DEVICE})." && \
+				continue; log "Could not change source routing from IPv4 address ${ip4} for interface ${INTERFACE} (${DEVICE})." "warn"
+			done
+
+			ip -4 route flush cache
+		fi
+
+		if [ "$ip6" = "" ]
+		then
+			log "No IPv6 address(es) found!" "debug"
+		else
+			if [ "$proto" = "6to4" ]
+			then ip -6 route add default via ::192.88.99.1 table "$table"
+			else ip -6 route add default dev "$DEVICE" table "$table"; fi
+
+			if [ "$?" = "0" ]
+			then log "Successfully added IPv6 routing table ${table} for interface ${INTERFACE} (${DEVICE})."
+			else log "Could not add IPv6 routing table ${table} for interface ${INTERFACE} (${DEVICE})." "warn"; fi
+
+			for ip in $ip6
+			do
+				ip -6 rule add from "$ip" to "$ip" lookup main priority "$priority" && \
+				ip -6 rule add from "$ip" lookup "$table" priority "$priority" && \
+				log "Successfully changed source routing from IPv6 address ${ip} for interface ${INTERFACE} (${DEVICE})." && \
+				continue; log "Could not change source routing from IPv6 address ${ip} for interface ${INTERFACE} (${DEVICE})." "warn"
+			done
+
+			ip -6 route flush cache
+		fi
+	fi
+
+	if [ "$odns_enable" -eq 1 -a "$hostname" != "disabled" ]
+	then
+		if [ "$hostname" != "" ]; then hostname="$hostname"
+		else hostname="${ifname}${odns_suffix}"; fi
+
+		network_get_ipaddr  ip4 "$INTERFACE"
+		network_get_ipaddr6 ip6 "$INTERFACE"
+
+		update_odns "$hostname" "$ip4" "$ip6"
+	fi
+
+	if [ "$restart_services" -eq 1 -o "$restart_services" -eq 2 ]; then
+	restart_services "$restart_service_default $restart_service_extended"; fi
+
+	if [ "$restart_networks" -eq 1 -o "$restart_networks" -eq 2 ]; then
+	restart_networks "$restart_network_default $restart_network_extended"; fi
+
+elif [ "$ACTION" = "ifdown" ]
+then
+	if [ "$source_routing" = "1" -o "$source_routing" -eq 3 ]
+	then
+		log "Removing source routing rules and routes for interface ${INTERFACE}."
+		ip -4 rule del table    "$table"    2>/dev/null
+		ip -6 rule del table    "$table"    2>/dev/null
+		ip -4 rule del priority "$priority" 2>/dev/null
+		ip -6 rule del priority "$priority" 2>/dev/null
+		ip -4 route flush table "$table"    2>/dev/null
+		ip -6 route flush table "$table"    2>/dev/null
+		ip -4 route flush cache
+		ip -6 route flush cache
+	fi
+
+	if [ "$restart_services" -eq 1 -o "$restart_services" -eq 3 ]; then
+	restart_services "$restart_service_default $restart_service_extended"; fi
+
+	if [ "$restart_networks" -eq 1 -o "$restart_networks" -eq 3 ]; then
+	restart_networks "$restart_network_default $restart_network_extended"; fi
+
+else
+	logger "Unsupported action!" "debug"
+	exit 0
+fi
+
+for iface in $ifaces
+do
+	get_var "enable_default_led_$iface"  "enable_default_led"
+	get_var "disable_default_led_$iface" "disable_default_led"
+	get_var "enable_led_$iface"  "enable_led"
+	get_var "disable_led_$iface" "disable_led"
+	network_get_device device "$iface"
+
+	default_leds=0
+	other_leds=0
+
+	if [ "$device" != "" ]
+	then other_leds=1; fi
+
+	if [ "$device" != "" ] && [ "$enable_default_led" != "" -o "$disable_default_led" != "" ]
+	then
+		get_var "routing_version_$iface" "routing_version"
+		get_var "target_ipv${routing_version}_$iface" "routing_target"
+
+		if ip "-${routing_version}" route get "${routing_target}" | grep " dev ${device} " &>/dev/null
+		then
+			default_leds=1
+			log "Interface ${iface} (dev ${device}) is the default route for ${routing_target}!" "debug"
+		else
+			log "Interface ${iface} (dev ${device}) is not the default route for ${routing_target}!" "debug"
+		fi
+	else
+		log "Interface ${iface} has no device, looks like it's down." "debug"
+	fi
+
+	if [ "$default_leds" -eq 1 ]
+	then
+		disable_leds "$enable_led"
+		disable_leds "$disable_led"
+		enable_leds "$enable_default_led" "$device"
+		disable_leds "$disable_default_led"
+	elif [ "$other_leds" -eq 1 ]
+	then
+		disable_leds "$enable_default_led"
+		disable_leds "$disable_default_led"
+		enable_leds "$enable_led" "$device"
+		disable_leds "$disable_led"
+	else
+		disable_leds "$enable_default_led"
+		disable_leds "$disable_default_led"
+		disable_leds "$enable_led"
+		disable_leds "$disable_led"
+	fi
+done

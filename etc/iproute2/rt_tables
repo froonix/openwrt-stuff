@@ -1,0 +1,17 @@
+#
+# reserved values
+#
+255	local
+254	main
+253	default
+0	unspec
+#
+# local
+#
+#1	inr.ruhep
+
+# ROUNDABOUT
+1024 dsl
+2048 umts
+4096 stf
+8192 he

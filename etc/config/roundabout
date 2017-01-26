@@ -1,0 +1,136 @@
+# Default values. Can be overridden at iface level.
+config 'global'
+
+	# Change source routing?
+	#  0 = always disabled
+	#  1 = enabled (default)
+	#  2 = for IPv4 only
+	#  3 = for IPv6 only
+	option source_routing    '1'
+
+	# Destination for routing check.
+	option target_ipv4       '1.1.1.1'
+	option target_ipv6       '2000::1'
+
+	# IPv4 or IPv6 for routing check?
+	option routing_ipv       '4'
+
+	# Restart services/networks?
+	#  0 = always disabled
+	#  1 = enabled
+	#  2 = only on up
+	#  3 = only on down
+	option restart_services  '0'
+	option restart_networks  '0'
+
+	# Services to restart at up/down.
+	list restart_service     'dnscrypt-proxy'
+	list restart_service     'qos'
+
+	# Interfaces to restart at up/down.
+	list restart_network     'stf'
+
+
+# OpenDNS config.
+config 'opendns'
+
+	# Enable DynDNS updates?
+	option enable            '1'
+
+	# OpenDNS login details.
+	option username          'USERNAME'
+	option password          'PASSWORD'
+
+	# Suffix for OpenDNS hostnames.
+	# Can be overriden at iface level.
+	option hostname          '.ddns.example.net'
+
+
+## Primary uplink
+#config iface 'dsl'
+#	option enable            '1'
+#	option routing_priority  '10001'
+#	option restart_networks  '1'
+#	option restart_services  '2'
+#	list restart_network     'umts'
+#
+#
+## Fallback uplink
+#config iface 'umts'
+#	option enable            '1'
+#	option routing_priority  '10002'
+#	option restart_networks  '1'
+#	option restart_services  '2'
+#
+#	list disable_led         'netgear:orange:wps'
+#	list enable_led          'netgear:green:wps'
+#	list disable_default_led 'netgear:green:wps'
+#	list enable_default_led  'netgear:orange:wps'
+#
+#
+## Test
+#config iface stf
+#	option enable            '1'
+#	option routing_priority  '10003'
+#	option hostname          'disabled'
+#
+## Test
+#config iface he
+#	option enable            '1'
+#	option routing_priority  '10004'
+#	option hostname          'disabled'
+
+
+# Example section for interface with name "example".
+# Use the exact same name as in /etc/config/network.
+config iface 'example'
+
+	# Enable configuration for this interface?
+	option enable            '0'
+
+	# Name of routing table. Defaults to interface name.
+	# For non-numerical values see: /etc/iproute2/rt_tables
+	option routing_table     '12345'
+
+	# Default source routing priority.
+	# Must be unique across all rules!
+	option routing_priority  '128'
+
+	# Override default values.
+	option source_routing    '1'
+	option restart_services  '1'
+	option restart_networks  '1'
+
+	# Extended the global lists.
+	list restart_service     'xinetd'
+	list restart_network     'child'
+
+	# Override OpenDNS DDNS hostname.
+	# Defaults to: <iface>.hostname
+	# To disable OpenDNS: "disabled"
+	option hostname          'sub.example.com'
+
+	# Alternatively use another prefix.
+	# Used together with hostname suffix.
+	# Used for named routing tables too!
+	option name              'parent'
+
+	# Enable/disable leds on interface status change.
+	# Alternatively invert the action if needed...
+	# At the moment on ifdown all leds are off!
+	list disable_led         'orange:led'
+	list enable_led          'green:led'
+
+	# If the interface is the new default route,
+	# change other leds too. See notes above.
+	list disable_default_led 'green:led'
+	list enable_default_led  'orange:led'
+
+	# Destination for default route check.
+	# Default value see global section.
+	option target_ipv4       '8.8.8.8'
+	option target_ipv6       '2001:4860:4860:0:0:0:0:8888'
+
+	# IPv4 or IPv6 for routing check?
+	# Default value see global section.
+	option routing_ipv       '6'
