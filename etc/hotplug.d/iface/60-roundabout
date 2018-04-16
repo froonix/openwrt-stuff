@@ -3,7 +3,7 @@
 #                                                                              #
 #                              ROUNDABOUT by KB19                              #
 #                            ----------------------                            #
-#                             v0.1.0 -- 2016/05/16                             #
+#                             v0.1.1 -- 2018/04/16                             #
 #                                                                              #
 # Successor of OWRHS (routing helper script). Now with UCI support.            #
 # Designed for OpenWrt 15.05 or newer, tested with version 15.05.1!            #
@@ -291,13 +291,16 @@ then
 		ip6=`ip -o -6 addr show "$DEVICE" scope global | awk '{ sub(/\/.*$/,"",$4); print $4 "/'"$prefix6"'" }' | grep -v '^f' | grep -v '\.'`
 		if [ "$ip6prefix" != "" ]; then ip6="$ip6 $ip6prefix"; fi
 
-		if [ "$ip4" = "" ]
+		network_get_gateway "gw4" "$INTERFACE"
+		network_get_gateway6 "gw6" "$INTERFACE"
+
+		if [ "$ip4" = "" -o "$gw4" = "" ]
 		then
-			log "No IPv4 address(es) found!" "debug"
+			log "No IPv4 address(es) or gateway found!" "debug"
 		else
-			if ip -4 route add default dev "$DEVICE" table "$table"
-			then log "Successfully added IPv4 routing table ${table} for interface ${INTERFACE} (${DEVICE})."
-			else log "Could not add IPv4 routing table ${table} for interface ${INTERFACE} (${DEVICE})." "warn"; fi
+			if ip -4 route add default dev "$DEVICE" via "$gw4" table "$table"
+			then log "Successfully added IPv4 routing table ${table} for interface ${INTERFACE} (${DEVICE}) via gateway ${gw4}."
+			else log "Could not add IPv4 routing table ${table} for interface ${INTERFACE} (${DEVICE}) via gateway ${gw4}." "warn"; fi
 
 			for ip in $ip4
 			do
@@ -309,17 +312,17 @@ then
 			ip -4 route flush cache
 		fi
 
-		if [ "$ip6" = "" ]
+		if [ "$ip6" = "" -o "$gw6" = "" ]
 		then
-			log "No IPv6 address(es) found!" "debug"
+			log "No IPv6 address(es) or gateway found!" "debug"
 		else
 			if [ "$proto" = "6to4" ]
-			then ip -6 route add default via ::192.88.99.1 table "$table"
-			else ip -6 route add default dev "$DEVICE" table "$table"; fi
+			then gw6="::192.88.99.1"; ip -6 route add default via "$gw6" table "$table"
+			else ip -6 route add default dev "$DEVICE" via "$gw6" table "$table"; fi
 
 			if [ "$?" = "0" ]
-			then log "Successfully added IPv6 routing table ${table} for interface ${INTERFACE} (${DEVICE})."
-			else log "Could not add IPv6 routing table ${table} for interface ${INTERFACE} (${DEVICE})." "warn"; fi
+			then log "Successfully added IPv6 routing table ${table} for interface ${INTERFACE} (${DEVICE}) via gateway ${gw6}."
+			else log "Could not add IPv6 routing table ${table} for interface ${INTERFACE} (${DEVICE}) via gateway ${gw6}." "warn"; fi
 
 			for ip in $ip6
 			do
@@ -372,7 +375,7 @@ then
 	restart_networks "$restart_network_default $restart_network_extended"; fi
 
 else
-	logger "Unsupported action!" "debug"
+	log "Unsupported action! ($ACTION)" "debug"
 	exit 0
 fi
 
