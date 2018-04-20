@@ -3,7 +3,7 @@
 #                                                                              #
 #                              ROUNDABOUT by KB19                              #
 #                            ----------------------                            #
-#                             v0.1.1 -- 2018/04/16                             #
+#                             v0.1.2 -- 2018/04/20                             #
 #                                                                              #
 # Successor of OWRHS (routing helper script). Now with UCI support.            #
 # Designed for OpenWrt 15.05 or newer, tested with version 15.05.1!            #
@@ -157,9 +157,9 @@ restart_networks()
 		log "restart_networks(): network=${network}" "debug"
 
 		if [ "$INTERFACE" != "$network" ]; then if ifup "$network"
-		then log "Successfully restarted network/interface ${network}."
-		else log "Could not restart network/interface ${network}!" "error"; fi
-		else log "Could not restart network/interface ${network}: Loop detected!" "warn"; fi
+		then log "Successfully restarted interface ${network}."
+		else log "Could not restart interface ${network}!" "error"; fi
+		else log "Could not restart interface ${network}: Loop detected!" "warn"; fi
 	done
 }
 
@@ -298,6 +298,10 @@ then
 		then
 			log "No IPv4 address(es) or gateway found!" "debug"
 		else
+			log "Removing IPv4 source routing rules and routes for interface ${INTERFACE}."
+			while ip -4 rule del priority "$priority" 2>/dev/null; do true; done
+			ip -4 route flush table "$table" 2>/dev/null
+
 			if ip -4 route add default dev "$DEVICE" via "$gw4" table "$table"
 			then log "Successfully added IPv4 routing table ${table} for interface ${INTERFACE} (${DEVICE}) via gateway ${gw4}."
 			else log "Could not add IPv4 routing table ${table} for interface ${INTERFACE} (${DEVICE}) via gateway ${gw4}." "warn"; fi
@@ -316,6 +320,10 @@ then
 		then
 			log "No IPv6 address(es) or gateway found!" "debug"
 		else
+			log "Removing IPv6 source routing rules and routes for interface ${INTERFACE}."
+			while ip -6 rule del priority "$priority" 2>/dev/null; do true; done
+			ip -6 route flush table "$table" 2>/dev/null
+
 			if [ "$proto" = "6to4" ]
 			then gw6="::192.88.99.1"; ip -6 route add default via "$gw6" table "$table"
 			else ip -6 route add default dev "$DEVICE" via "$gw6" table "$table"; fi
@@ -358,12 +366,10 @@ then
 	if [ "$source_routing" = "1" -o "$source_routing" -eq 3 ]
 	then
 		log "Removing source routing rules and routes for interface ${INTERFACE}."
-		ip -4 rule del table    "$table"    2>/dev/null
-		ip -6 rule del table    "$table"    2>/dev/null
-		ip -4 rule del priority "$priority" 2>/dev/null
-		ip -6 rule del priority "$priority" 2>/dev/null
-		ip -4 route flush table "$table"    2>/dev/null
-		ip -6 route flush table "$table"    2>/dev/null
+		while ip -4 rule del priority "$priority" 2>/dev/null; do true; done
+		while ip -6 rule del priority "$priority" 2>/dev/null; do true; done
+		ip -4 route flush table "$table" 2>/dev/null
+		ip -6 route flush table "$table" 2>/dev/null
 		ip -4 route flush cache
 		ip -6 route flush cache
 	fi
@@ -406,7 +412,7 @@ do
 			log "Interface ${iface} (dev ${device}) is not the default route for ${routing_target}!" "debug"
 		fi
 	else
-		log "Interface ${iface} has no device, looks like it's down." "debug"
+		log "Interface ${iface} has no device or no LED configuration." "debug"
 	fi
 
 	if [ "$default_leds" -eq 1 ]
