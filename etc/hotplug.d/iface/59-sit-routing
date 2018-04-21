@@ -3,7 +3,7 @@
 #                                                                              #
 #                             SIT-ROUTING by KB19                              #
 #                            ----------------------                            #
-#                             v0.1.1 -- 2018/04/21                             #
+#                             v0.1.2 -- 2018/04/21                             #
 #                                                                              #
 # Deletes routes created by 6in4 tunnels.                                      #
 #                                                                              #
@@ -20,24 +20,28 @@ if [ "$ACTION" = "ifup" -a ! -z "$INTERFACE" ]
 then
 	config_load "network"
 	config_get proto "$INTERFACE" proto
-	config_get ipaddr "$INTERFACE" ipaddr
-	config_get peeraddr "$INTERFACE" peeraddr
 
-	if [ -z "$ipaddr" ]
+	if [ "$proto" = "6in4" ]
 	then
-		# Workaround for dynamic local 6in4 endpoints: Get IP address from SIT interface...
-		ipaddr=`ip -4 -o link show dev "$DEVICE" | grep -Eo 'link/sit ([0-9]{1,3}\.){3}[0-9]{1,3}' | cut -d ' ' -f 2`
-	fi
+		config_get peeraddr "$INTERFACE" peeraddr
+		config_get ipaddr "$INTERFACE" ipaddr
 
-	if [ "$proto" = "6in4" -a ! -z "$ipaddr" -a ! -z "$peeraddr" ] \
-	&& __network_ifstatus "iface" "" "[@['ipv4-address'][*]['address']='$ipaddr'].interface"
-	then
-		network_get_device "device" "$iface"
-		network_get_gateway "gateway" "$iface"
-		__network_ifstatus "metric" "$iface" ".metric"
+		if [ -z "$ipaddr" ]
+		then
+			# Workaround for dynamic local 6in4 endpoints: Get IP address from SIT interface...
+			ipaddr=`ip -4 -o link show dev "$DEVICE" | grep -Eo 'link/sit ([0-9]{1,3}\.){3}[0-9]{1,3}' | cut -d ' ' -f 2`
+		fi
 
-		if ip -4 route del "$peeraddr/32" via "$gateway" dev "$device" proto "static" metric "${metric:-0}" 2>/dev/null
-		then logger -p "user.info" -t "sit-routing[$$]" -s "Deleted route to $peeraddr, created by 6in4 interface $INTERFACE."
+		if [ ! -z "$peeraddr" -a ! -z "$ipaddr" ] \
+		&& __network_ifstatus "iface" "" "[@['ipv4-address'][*]['address']='$ipaddr'].interface"
+		then
+			network_get_device "device" "$iface"
+			network_get_gateway "gateway" "$iface"
+			__network_ifstatus "metric" "$iface" ".metric"
+
+			if ip -4 route del "$peeraddr/32" via "$gateway" dev "$device" proto "static" metric "${metric:-0}" 2>/dev/null
+			then logger -p "user.info" -t "sit-routing[$$]" -s "Deleted route to $peeraddr, created by 6in4 interface $INTERFACE."
+			fi
 		fi
 	fi
 fi
