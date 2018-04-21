@@ -3,7 +3,7 @@
 #                                                                              #
 #                             SIT-ROUTING by KB19                              #
 #                            ----------------------                            #
-#                             v0.1.0 -- 2018/04/21                             #
+#                             v0.1.1 -- 2018/04/21                             #
 #                                                                              #
 # Deletes routes created by 6in4 tunnels.                                      #
 #                                                                              #
@@ -22,6 +22,12 @@ then
 	config_get proto "$INTERFACE" proto
 	config_get ipaddr "$INTERFACE" ipaddr
 	config_get peeraddr "$INTERFACE" peeraddr
+
+	if [ -z "$ipaddr" ]
+	then
+		# Workaround for dynamic local 6in4 endpoints: Get IP address from SIT interface...
+		ipaddr=`ip -4 -o link show dev "$DEVICE" | grep -Eo 'link/sit ([0-9]{1,3}\.){3}[0-9]{1,3}' | cut -d ' ' -f 2`
+	fi
 
 	if [ "$proto" = "6in4" -a ! -z "$ipaddr" -a ! -z "$peeraddr" ] \
 	&& __network_ifstatus "iface" "" "[@['ipv4-address'][*]['address']='$ipaddr'].interface"
