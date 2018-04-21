@@ -54,6 +54,11 @@ config 'opendns'
 #	option restart_services  '2'
 #	list restart_network     'umts'
 #
+#	list route               '8.8.8.8'
+#	list route               '8.8.4.4'
+#	list route               '2001:4860:4860::8888'
+#	list route               '2001:4860:4860::8844'
+#
 #
 ## Fallback uplink
 #config iface 'umts'
@@ -134,3 +139,12 @@ config iface 'example'
 	# IPv4 or IPv6 for routing check?
 	# Default value see global section.
 	option routing_ipv       '6'
+
+	# Dynamic routes for this interface.
+	# Only for addresses routed via next hop.
+	# You can set a metric with "<IP>#<METRIC>"!
+	# Default metric is taken from interface...
+	list route               '10.0.0.250'
+	list route               '10.0.0.0/30'
+	list route               '10.0.0.8#10'
+	list route               '2001:db8::1'
