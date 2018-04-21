@@ -20,7 +20,6 @@
 #                                                                              #
 # UCI config: /etc/config/roundabout                                           #
 # Executable: /etc/hotplug.d/iface/60-roundabout                               #
-# Wiki page:  ***** HIDDEN *****                                               #
 #                                                                              #
 ################################################################################
 #                                                                              #
