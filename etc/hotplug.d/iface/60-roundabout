@@ -3,7 +3,7 @@
 #                                                                              #
 #                              ROUNDABOUT by KB19                              #
 #                            ----------------------                            #
-#                             v0.1.3 -- 2018/04/21                             #
+#                             v0.1.4 -- 2018/04/25                             #
 #                                                                              #
 # Successor of OWRHS (routing helper script). Now with UCI support.            #
 # Designed for OpenWrt 15.05 or newer, tested with version 15.05.1!            #
@@ -370,12 +370,6 @@ then
 		update_odns "$hostname" "$ip4" "$ip6"
 	fi
 
-	if [ "$restart_services" -eq 1 -o "$restart_services" -eq 2 ]; then
-	restart_services "$restart_service_default $restart_service_extended"; fi
-
-	if [ "$restart_networks" -eq 1 -o "$restart_networks" -eq 2 ]; then
-	restart_networks "$restart_network_default $restart_network_extended"; fi
-
 	if [ ! -z "$routes" ]
 	then
 		__network_ifstatus "metric" "$INTERFACE" ".metric"
@@ -405,7 +399,16 @@ then
 				fi
 			fi
 		done
+
+		ip -4 route flush cache
+		ip -6 route flush cache
 	fi
+
+	if [ "$restart_services" -eq 1 -o "$restart_services" -eq 2 ]; then
+	restart_services "$restart_service_default $restart_service_extended"; fi
+
+	if [ "$restart_networks" -eq 1 -o "$restart_networks" -eq 2 ]; then
+	restart_networks "$restart_network_default $restart_network_extended"; fi
 
 elif [ "$ACTION" = "ifdown" ]
 then
