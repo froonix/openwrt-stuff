@@ -7,6 +7,7 @@ clean:
 
 pkg-roundabout:
 	@echo Packaging Roundabout: Snapshot $(commit)
-	tar cfa "./tmp/roundabout-$(commit).tar.xz" \
-		./etc/hotplug.d/iface/60-roundabout \
-		./etc/config/roundabout
+	tar --transform="s|^|roundabout-$(commit)/|" \
+		-acf "./tmp/roundabout-$(commit).tar.xz" \
+			etc/hotplug.d/iface/60-roundabout \
+			etc/config/roundabout
