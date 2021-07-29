@@ -31,21 +31,6 @@ config 'global'
 	list restart_network     'stf'
 
 
-# OpenDNS config.
-config 'opendns'
-
-	# Enable DynDNS updates?
-	option enable            '1'
-
-	# OpenDNS login details.
-	option username          'USERNAME'
-	option password          'PASSWORD'
-
-	# Suffix for OpenDNS hostnames.
-	# Can be overriden at iface level.
-	option hostname          '.ddns.example.net'
-
-
 ## Primary uplink
 #config iface 'dsl'
 #	option enable            '1'
@@ -109,11 +94,6 @@ config iface 'example'
 	# Extended the global lists.
 	list restart_service     'xinetd'
 	list restart_network     'child'
-
-	# Override OpenDNS DDNS hostname.
-	# Defaults to: <iface>.hostname
-	# To disable OpenDNS: "disabled"
-	option hostname          'sub.example.com'
 
 	# Alternatively use another prefix.
 	# Used together with hostname suffix.

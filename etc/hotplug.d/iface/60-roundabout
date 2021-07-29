@@ -3,10 +3,10 @@
 #                                                                              #
 #                              ROUNDABOUT by KB19                              #
 #                            ----------------------                            #
-#                             v0.1.4 -- 2018/04/25                             #
+#                             v0.2.0 -- 2021/07/29                             #
 #                                                                              #
 # Successor of OWRHS (routing helper script). Now with UCI support.            #
-# Designed for OpenWrt 15.05 or newer, tested with version 15.05.1!            #
+# Designed for OpenWrt 15.05 or newer, tested with version 21.02.0!            #
 #                                                                              #
 # This script is a helper script for the following purposes:                   #
 #                                                                              #
@@ -14,9 +14,8 @@
 #  * Policy-Based Routing (PBR): Setup rules and tables for source addresses.  #
 #  * LED management (routing): Enable or disable leds on default route change. #
 #  * LED management (link layer): Enable or disable leds on ifup/ifdown.       #
-#  * OpenDNS hostname updates: Use DynDNS to update the IP addresses.          #
 #                                                                              #
-# There's full IPv6 support for all features! (excluding OpenDNS stuff...)     #
+# There's full IPv6 support for all features!                                  #
 #                                                                              #
 # UCI config: /etc/config/roundabout                                           #
 # Executable: /etc/hotplug.d/iface/60-roundabout                               #
@@ -34,13 +33,6 @@
 #   global.restart_networks = <0/1>  Enable/disable restart of interfaces.     #
 #   global.restart_network  = <...>  List of interfaces to restart.            #
 #                                                                              #
-# Note: opendns.enable can be overridden at "iface" level too.                 #
-#                                                                              #
-#   opendns.enable          = <0/1>  Enable/disable OpenDNS DDNS updates.      #
-#   opendns.username        = <...>  Username for OpenDNS dashboard.           #
-#   opendns.password        = <...>  Password for OpenDNS dashboard.           #
-#   opendns.hostname        = <...>  Suffix for OpenDNS hostnames.             #
-#                                                                              #
 # Interface section for "name": config iface name                              #
 # Don't forget: All global variables are valid here.                           #
 #                                                                              #
@@ -48,8 +40,7 @@
 #   iface.routing_priority  = <...>  Required! Unique priority for rules.      #
 #                                                                              #
 #   iface.routing_table     = <...>  ID or name, see: /etc/iproute2/rt_tables  #
-#   iface.name              = <...>  Use another name for OpenDNS and table.   #
-#   iface.hostname          = <...>  Use another hostname for OpenDNS.         #
+#   iface.name              = <...>  Use another interface name for table.     #
 #   iface.route             = <...>  Custom routes for this interface.         #
 #                                                                              #
 # Warning: All leds will be switched off at ifdown or default route loss!      #
@@ -70,8 +61,8 @@
 # The routing metric decides which one is currently used. There is no Multiwan #
 # package required! It depends on PPPoE-session errors. Furthermore there are  #
 # multiple IPv6 tunnels. PBR is used for all IPv4/IPv6 addresses and subnets.  #
-# Update OpenDNS hosts on-the-fly, restart QOS/DNSCrypt and 6to4 interface.    #
-# Furthermore it controls the WPS-LED, indicating our routing status...        #
+# It restarts QOS/DNSCrypt and 6to4 interface. Furthermore it controls the     #
+# WPS-LED, indicating our routing status...                                    #
 #                                                                              #
 #     WPS LED (UMTS Uplink)                                                    #
 #     ------------------------                                                 #
@@ -105,7 +96,7 @@ get_var()
 	eval "$2=\"\$$1\""
 }
 
-# UCI callback for global/opendns section.
+# UCI callback for global config section.
 # Results will be stored in "$cfg_<NAME>".
 config_cb()
 {
@@ -161,33 +152,6 @@ restart_networks()
 		else log "Could not restart interface ${network}!" "error"; fi
 		else log "Could not restart interface ${network}: Loop detected!" "warn"; fi
 	done
-}
-
-# Update OpenDNS hostname with current IP.
-# Arguments: hostname, ipv4 addr, ipv6 addr.
-update_odns()
-{
-	local host="$1"
-	local ipv4="$2"
-	local ipv6="$3"
-
-	if [ "$ipv6" != "" ]
-	then
-		log "Ignoring IPv6, not supported by OpenDNS." "debug"
-	fi
-
-	if [ "$ipv4" != "" ]
-	then
-		result=`\
-			wget --quiet --tries=3 --timeout=30 --bind-address="$ipv4" \
-				--http-user="$odns_username" --http-password="$odns_password" \
-				"https://updates.opendns.com/nic/update?hostname=${host}" \
-				--output-document=- | tr -d '\n'`
-
-		if [ "$result" = "good ${ipv4}" ]
-		then log "Successfully updated OpenDNS hostname ${host} with IP ${ipv4}."
-		else log "Could not update OpenDNS hostname ${host} with IP ${ipv4}: ${result}" "warn"; fi
-	fi
 }
 
 # Enable leds. Pass all names by space separated as first argument.
@@ -268,11 +232,6 @@ config_get      restart_network_extended "$INTERFACE"   restart_network
 config_get      routes                   "$INTERFACE"   route
 
 # All other UCI elements...
-config_get_bool odns_enable              "$cfg_opendns" enable           "0"
-config_get      odns_username            "$cfg_opendns" username
-config_get      odns_password            "$cfg_opendns" password
-config_get      odns_suffix              "$cfg_opendns" hostname
-config_get      hostname                 "$INTERFACE"   hostname
 config_get      ifname                   "$INTERFACE"   name             "$INTERFACE"
 config_get      table                    "$INTERFACE"   routing_table    "$ifname"
 config_get      priority                 "$INTERFACE"   routing_priority "0"
@@ -280,17 +239,13 @@ config_get      priority                 "$INTERFACE"   routing_priority "0"
 if [ "$source_routing" -ne 0 ] && [ "$priority" -lt 0 -o "$priority" -gt 65536 ]
 then log "Missing routing priority! Skipping interface..." "error"; exit 1; fi
 
-if [ "$odns_enable" -eq 1 ] && [ "$odns_username" = "" -o "$odns_password" = "" ]
-then odns_enable=0; log "OpenDNS updates disabled: Missing username/password!" "warn"; fi
-
 config_load "network" || exit 1
 log "Network config loaded into memory." "debug"
 config_get ip6prefix "$INTERFACE" ip6prefix
 config_get proto "$INTERFACE" proto
 
 log "VARDUMP: proto=${proto}; ifname=${ifname}; table=${table}; priority=${priority}; ip6prefix=${ip6prefix}" "debug"
-log "VARDUMP: source_routing=${source_routing}; odns_enable=${odns_enable}; odns_suffix=${odns_suffix}; hostname=${hostname}" "debug"
-log "VARDUMP: restart_services=${restart_services} (${restart_service_default} ${restart_service_extended}); restart_networks=${restart_networks} (${restart_network_default} ${restart_network_extended})" "debug"
+log "VARDUMP: source_routing=${source_routing}; restart_services=${restart_services} (${restart_service_default} ${restart_service_extended}); restart_networks=${restart_networks} (${restart_network_default} ${restart_network_extended})" "debug"
 
 if [ "$ACTION" = "ifup" ]
 then
@@ -357,17 +312,6 @@ then
 
 			ip -6 route flush cache
 		fi
-	fi
-
-	if [ "$odns_enable" -eq 1 -a "$hostname" != "disabled" ]
-	then
-		if [ "$hostname" != "" ]; then hostname="$hostname"
-		else hostname="${ifname}${odns_suffix}"; fi
-
-		network_get_ipaddr  ip4 "$INTERFACE"
-		network_get_ipaddr6 ip6 "$INTERFACE"
-
-		update_odns "$hostname" "$ip4" "$ip6"
 	fi
 
 	if [ ! -z "$routes" ]
