@@ -1,14 +1,18 @@
 #!/bin/sh
 
 case $1 in
--h) arg="--hours"     ;;
--d) arg="--days"      ;;
--m) arg="--months"    ;;
--t) arg="--top10"     ;;
--s) arg="--summary"   ;;
--hs) arg="--hsummary" ;;
--vs) arg="--vsummary" ;;
-*) exit 1 ;;
+-5)  arg="--fiveminutes" ;;
+-5g) arg="--fivegraph"   ;;
+-h)  arg="--hours"       ;;
+-hg) arg="--hoursgraph"  ;;
+-d)  arg="--days"        ;;
+-m)  arg="--months"      ;;
+-y)  arg="--years"       ;;
+-t)  arg="--top"         ;;
+-s)  arg="--summary"     ;;
+-hs) arg="--hsummary"    ;;
+-vs) arg="--vsummary"    ;;
+*)   exit 1              ;;
 esac
 
 if [ "$2" = "" ]; then exit 2; fi
