@@ -1,0 +1,22 @@
+#!/bin/sh
+if [ "$ACTION" = "add" ] && printf %s "$DEVICENAME" | grep -qFv :
+then
+	if [ "$PRODUCT" = "9da/a/1" ] || [ "$PRODUCT" = "c45/7401/1" ]
+	then
+		# Optional!
+		usbipd -D
+
+		for i in $(seq 1 10)
+		do
+			if usbip list -p -l | grep -qF "busid=${DEVICENAME}#"
+			then
+				usbip bind -b "${DEVICENAME}" 2>&1 | logger -s -t usbip-hotplug
+				exit $?
+			fi
+
+			sleep 1
+		done
+
+		logger -s -t usbip-hotplug "Could not find device on bus ${DEVICENAME}!"
+	fi
+fi
