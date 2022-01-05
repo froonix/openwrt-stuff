@@ -1,9 +1,9 @@
 #!/bin/sh
-if [ "$ACTION" = "add" ] && printf %s "$DEVICENAME" | grep -qFv :
+if [ "$ACTION" = "add" ] && printf %s "$DEVICENAME" | grep -qF - && printf %s "$DEVICENAME" | grep -qFv :
 then
+	# Optional: Whitelist for exported devices.
 	if [ "$PRODUCT" = "9da/a/1" ] || [ "$PRODUCT" = "c45/7401/1" ]
 	then
-		# Optional!
 		usbipd -D
 
 		for i in $(seq 1 10)
