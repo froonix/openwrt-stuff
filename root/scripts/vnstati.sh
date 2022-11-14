@@ -16,6 +16,6 @@ case $1 in
 esac
 
 if [ "$2" = "" ]; then exit 2; fi
-file=`mktemp`; if [ "$file" = "" ]; then exit 3; fi
-vnstati "$arg" --iface "$2" --output "$file" && cat "$file"
-c=$?; rm -f "$file" && exit "$c"; exit 5
+file=$(mktemp); if [ "$file" = "" ]; then exit 3; fi
+mv -n "$file" "$file.png" && vnstati "$arg" --iface "$2" --output "$file.png" && cat "$file.png"
+c=$?; rm -f "$file" "$file.png" && exit "$c"; exit 5
