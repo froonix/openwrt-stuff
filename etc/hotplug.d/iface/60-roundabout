@@ -3,7 +3,7 @@
 #                                                                              #
 #                              ROUNDABOUT by KB19                              #
 #                            ----------------------                            #
-#                             v0.2.0 -- 2021/07/29                             #
+#                             v0.2.1 -- 2023/10/21                             #
 #                                                                              #
 # Successor of OWRHS (routing helper script). Now with UCI support.            #
 # Designed for OpenWrt 15.05 or newer, tested with version 21.02.0!            #
@@ -249,24 +249,15 @@ log "VARDUMP: source_routing=${source_routing}; restart_services=${restart_servi
 
 if [ "$ACTION" = "ifup" ]
 then
-	network_get_gateway  "gw4" "$INTERFACE"
-	network_get_gateway6 "gw6" "$INTERFACE"
-
 	if [ "$source_routing" = "1" -o "$source_routing" -eq 2 ]
 	then
 		prefix4="32"
-		prefix6="128"
-
-		if [ "$proto" = "6to4" ]
-		then prefix6="48"; fi
-
-		ip4=`ip -o -4 addr show "$DEVICE" scope global | awk '{ sub(/\/.*$/,"",$4); print $4 "/'"$prefix4"'" }'`
-		ip6=`ip -o -6 addr show "$DEVICE" scope global | awk '{ sub(/\/.*$/,"",$4); print $4 "/'"$prefix6"'" }' | grep -v '^f' | grep -v '\.'`
-		if [ "$ip6prefix" != "" ]; then ip6="$ip6 $ip6prefix"; fi
+		network_get_gateway  "gw4" "$INTERFACE"
+		ip4=$(ip -o -4 addr show "$DEVICE" scope global | awk '{ sub(/\/.*$/,"",$4); print $4 "/'"$prefix4"'" }')
 
 		if [ "$ip4" = "" -o "$gw4" = "" ]
 		then
-			log "No IPv4 address(es) or gateway found!" "debug"
+			log "No IPv4 address(es) or gateway found for interface ${INTERFACE} (${DEVICE})!" "warn"
 		else
 			log "Removing IPv4 source routing rules and routes for interface ${INTERFACE}."
 			while ip -4 rule del priority "$priority" 2>/dev/null; do true; done
@@ -285,10 +276,25 @@ then
 
 			ip -4 route flush cache
 		fi
+	fi
+
+	if [ "$source_routing" = "1" -o "$source_routing" -eq 3 ]
+	then
+		[ "$proto" = "6to4" ] \
+		&& prefix6="48" \
+		|| prefix6="128"
+
+		network_get_gateway6 "gw6" "$INTERFACE"
+		ip6=$(ip -o -6 addr show "$DEVICE" scope global | awk '{ sub(/\/.*$/,"",$4); print $4 "/'"$prefix6"'" }' | grep -v '^f' | grep -v '\.')
+
+		if [ "$ip6prefix" != "" ]
+		then
+			ip6="$ip6 $ip6prefix"
+		fi
 
 		if [ "$ip6" = "" -o "$gw6" = "" ]
 		then
-			log "No IPv6 address(es) or gateway found!" "debug"
+			log "No IPv6 address(es) or gateway found! ${INTERFACE} (${DEVICE})" "warn"
 		else
 			log "Removing IPv6 source routing rules and routes for interface ${INTERFACE}."
 			while ip -6 rule del priority "$priority" 2>/dev/null; do true; done
@@ -314,15 +320,15 @@ then
 		fi
 	fi
 
-	if [ ! -z "$routes" ]
+	if [ -n "$routes" ]
 	then
 		__network_ifstatus "metric" "$INTERFACE" ".metric"
 		metric="${metric:-0}"
 
 		for to in $routes
 		do
-			realto=`echo "$to" | cut -d '#' -f 1`
-			realmetric=`echo "$to" | cut -d '#' -f 2 -s`
+			realto=$(echo "$to" | cut -d '#' -f 1)
+			realmetric=$(echo "$to" | cut -d '#' -f 2 -s)
 			if [ -z "$realmetric" ]; then realmetric=$metric; fi
 
 			if get_ipversion "$to" "ipv"
@@ -335,7 +341,7 @@ then
 				continue
 			fi
 
-			if [ ! -z "$realgw" ]
+			if [ -n "$realgw" ]
 			then
 				ip route add "$realto" via "$realgw" dev "$DEVICE" metric "$realmetric"; status=$?
 				if [ "$status" -eq 0 ]; then log "New route: $realto via $realgw dev $DEVICE metric $realmetric" "info"
@@ -356,14 +362,19 @@ then
 
 elif [ "$ACTION" = "ifdown" ]
 then
+	if [ "$source_routing" = "1" -o "$source_routing" -eq 2 ]
+	then
+		log "Removing IPv4 source routing rules and routes for interface ${INTERFACE}."
+		while ip -4 rule del priority "$priority" 2>/dev/null; do true; done
+		ip -4 route flush table "$table" 2>/dev/null
+		ip -4 route flush cache
+	fi
+
 	if [ "$source_routing" = "1" -o "$source_routing" -eq 3 ]
 	then
-		log "Removing source routing rules and routes for interface ${INTERFACE}."
-		while ip -4 rule del priority "$priority" 2>/dev/null; do true; done
+		log "Removing IPv6 source routing rules and routes for interface ${INTERFACE}."
 		while ip -6 rule del priority "$priority" 2>/dev/null; do true; done
-		ip -4 route flush table "$table" 2>/dev/null
 		ip -6 route flush table "$table" 2>/dev/null
-		ip -4 route flush cache
 		ip -6 route flush cache
 	fi
 
